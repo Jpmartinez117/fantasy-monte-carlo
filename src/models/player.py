@@ -1,0 +1,1 @@
+"""Player model definitions and attributes."""

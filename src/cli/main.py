@@ -1,0 +1,1 @@
+"""Entry point for the Fantasy Draft helper CLI."""
