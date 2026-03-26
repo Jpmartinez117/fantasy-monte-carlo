@@ -64,3 +64,12 @@ def validate_player_row(row):
         "Mean": mean,
         "StdDev": std_dev,
     }
+
+test_row = {
+    "Name": " Justin Jefferson ",
+    "Position": " wr ",
+    "Mean": "18.1",
+    "StdDev": "5.5"
+}
+
+print(validate_player_row(test_row))
