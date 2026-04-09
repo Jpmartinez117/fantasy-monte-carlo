@@ -9,6 +9,21 @@ from src.simulation.monte_carlo import SimulationResults
 
 
 @dataclass
+class H2HResult:
+    """Outcome of a head-to-head roster simulation.
+
+    All percentages are out of 100 (e.g. 63.4 means 63.4%).
+    avg_margin is positive when Team A has the advantage.
+    """
+    team_a_win_pct: float
+    team_b_win_pct: float
+    tie_pct: float
+    avg_margin: float   # mean(team_a_total - team_b_total) across all simulations
+    team_a_mean: float  # average total points for team A per simulation
+    team_b_mean: float  # average total points for team B per simulation
+
+
+@dataclass
 class PlayerStats:
     """Per-player summary statistics derived from simulation scores.
 
@@ -64,6 +79,63 @@ def compute_stats(results: SimulationResults, players: List[Player]) -> List[Pla
 def rank_players(stats_list: List[PlayerStats]) -> List[PlayerStats]:
     """Return players sorted by mean simulated score, highest first."""
     return sorted(stats_list, key=lambda s: s.mean, reverse=True)
+
+
+def head_to_head(
+    results: SimulationResults,
+    team_a_names: List[str],
+    team_b_names: List[str],
+) -> H2HResult:
+    """Compare two rosters across every simulation and return win probabilities.
+
+    For each simulation trial we sum each team's individual player scores to
+    get a total team score, then tally wins, losses, and ties.
+
+    Args:
+        results:       SimulationResults from run_simulation() containing all players.
+        team_a_names:  Player names that make up Team A's roster.
+        team_b_names:  Player names that make up Team B's roster.
+
+    Returns:
+        H2HResult with win percentages and average scoring margin.
+
+    Raises:
+        ValueError: If any player name is not found in results.
+    """
+    # Validate that every name exists in the simulation data
+    known = set(results.scores.keys())
+    for name in team_a_names + team_b_names:
+        if name not in known:
+            raise ValueError(f"Player not found in simulation results: {name!r}")
+
+    n = results.n_simulations
+
+    # Build per-simulation totals by summing each roster's scores trial-by-trial
+    # zip(*list_of_lists) transposes: we get one tuple of scores per simulation
+    team_a_totals = [
+        sum(scores[i] for scores in (results.scores[name] for name in team_a_names))
+        for i in range(n)
+    ]
+    team_b_totals = [
+        sum(scores[i] for scores in (results.scores[name] for name in team_b_names))
+        for i in range(n)
+    ]
+
+    # Tally outcomes across all simulations
+    a_wins = sum(1 for a, b in zip(team_a_totals, team_b_totals) if a > b)
+    b_wins = sum(1 for a, b in zip(team_a_totals, team_b_totals) if b > a)
+    ties   = n - a_wins - b_wins
+
+    margins = [a - b for a, b in zip(team_a_totals, team_b_totals)]
+
+    return H2HResult(
+        team_a_win_pct=100 * a_wins / n,
+        team_b_win_pct=100 * b_wins / n,
+        tie_pct=100 * ties / n,
+        avg_margin=statistics.mean(margins),
+        team_a_mean=statistics.mean(team_a_totals),
+        team_b_mean=statistics.mean(team_b_totals),
+    )
 
 
 # ---------------------------------------------------------------------------
