@@ -129,16 +129,16 @@ def head_to_head(
 
     n = results.n_simulations
 
-    # Build per-simulation totals by summing each roster's scores trial-by-trial
-    # zip(*list_of_lists) transposes: we get one tuple of scores per simulation
-    team_a_totals = [
-        sum(scores[i] for scores in (results.scores[name] for name in team_a_names))
-        for i in range(n)
-    ]
-    team_b_totals = [
-        sum(scores[i] for scores in (results.scores[name] for name in team_b_names))
-        for i in range(n)
-    ]
+    # Hoist the score-list lookups out of the trial loop so each player's
+    # list is dereferenced exactly once instead of once per simulation.
+    team_a_lists = [results.scores[name] for name in team_a_names]
+    team_b_lists = [results.scores[name] for name in team_b_names]
+
+    # zip(*lists) transposes per-player rows into per-trial columns: one
+    # tuple per simulation containing each rostered player's score for
+    # that trial.  Summing each tuple gives the team's total for the trial.
+    team_a_totals = [sum(trial) for trial in zip(*team_a_lists)]
+    team_b_totals = [sum(trial) for trial in zip(*team_b_lists)]
 
     # Tally outcomes across all simulations
     a_wins = sum(1 for a, b in zip(team_a_totals, team_b_totals) if a > b)

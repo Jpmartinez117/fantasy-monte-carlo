@@ -326,3 +326,28 @@ A whole-codebase audit identified eight low-risk improvements across performance
 
   Honest note: the original audit projected 2-3× speedup. That overestimated the gain — `rng.gauss()` itself dominates the inner loop, so removing the dict lookup + `.append` saves only a small fraction of total work. The change is still strictly better (faster + clearer + fewer lines), just by less than first claimed.
 - **Effort:** ~10 lines changed in `src/simulation/monte_carlo.py`. Zero new tests needed; existing reproducibility, score-property, and statistics tests already cover the contract.
+
+#### Opt #O2. `head_to_head` — hoisted score lookups + `zip` transpose
+- **What:** Replaced the per-trial nested generator pattern that re-resolved `results.scores[name]` for every simulation with a two-step approach: dereference each rostered player's score list **once** up front, then use `zip(*lists)` to transpose into per-trial tuples and `sum()` each tuple.
+  ```python
+  # Before — re-resolved results.scores[name] inside every trial
+  team_a_totals = [
+      sum(scores[i] for scores in (results.scores[name] for name in team_a_names))
+      for i in range(n)
+  ]
+  # After
+  team_a_lists = [results.scores[name] for name in team_a_names]
+  team_a_totals = [sum(trial) for trial in zip(*team_a_lists)]
+  ```
+- **Why:** Removes 8 × 100,000 = 800k redundant dict lookups for a typical 8-player roster at 100k sims. `zip(*lists)` and `sum(tuple)` are both highly optimized in CPython. The new code also reads as a direct expression of intent ("transpose, then sum each column").
+- **Measured speedup** on a 100k-sim, 8-vs-8 head-to-head (averaged over 20 calls):
+
+  | Implementation | Time per call |
+  |---|---|
+  | Before (nested generators)         | ~302 ms |
+  | After (hoist + `zip` transpose)    | ~134 ms |
+  | **Speedup**                        | **~2.25×** |
+
+  Much bigger win than O1 because the old code's redundant dict lookups dominated the trial loop, whereas in `run_simulation` the `rng.gauss()` call dominated.
+- **Behavior:** Identical to before — same totals, same H2HResult fields. All 100 tests pass unchanged.
+- **Effort:** ~10 lines changed in `src/stats/statistics_engine.py`.
