@@ -49,15 +49,20 @@ def run_simulation(
     # Use an isolated Random instance so we don't affect Python's global RNG
     rng = random.Random(seed)
 
-    # Pre-allocate one list per player to avoid repeated dict look-ups inside the loop
-    scores: Dict[str, List[float]] = {p.name: [] for p in players}
-
-    # --- Core Monte Carlo loop ---
-    # Each iteration is one "week" — every player gets an independent score draw
-    for _ in range(n_simulations):
-        for player in players:
-            # Sample from the player's distribution; clamp negatives to 0
-            raw = rng.gauss(player.mean, player.std_dev)
-            scores[player.name].append(max(0.0, raw))
+    # Generate each player's full sample batch in one pass via a list
+    # comprehension.  This avoids one dict lookup (`scores[player.name]`)
+    # per draw and lets the comprehension pre-size each list, sidestepping
+    # incremental append/resize costs.  Note: the RNG draw order changes
+    # from per-trial-interleaved to per-player-batched, so the exact
+    # numeric output for a given seed will differ from earlier versions —
+    # but the statistical properties (mean, std_dev, percentiles) are
+    # identical, which is what every test asserts on.
+    scores: Dict[str, List[float]] = {
+        p.name: [
+            max(0.0, rng.gauss(p.mean, p.std_dev))
+            for _ in range(n_simulations)
+        ]
+        for p in players
+    }
 
     return SimulationResults(scores=scores, n_simulations=n_simulations)

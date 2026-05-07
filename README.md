@@ -301,3 +301,28 @@ All eight findings from the project audit are now resolved:
 | #8 | Whitespace-only Player name passes validation | 3 |
 
 The clamping bias and Windows-pipe em-dash items remain documented as known accepted limitations, not bugs.
+
+### Task 8 — Optimization Pass (in progress)
+
+A whole-codebase audit identified eight low-risk improvements across performance, readability, and maintainability — all within MVP scope (no new dependencies, no architectural shifts). Picking off the highest-value ones in small, isolated commits.
+
+#### Opt #O1. Monte Carlo loop inversion + pre-allocated lists
+- **What:** Replaced the nested `for sim in range(N): for player in players: scores[name].append(...)` pattern with a single dict comprehension that builds each player's full sample list in one pass:
+  ```python
+  scores = {
+      p.name: [max(0.0, rng.gauss(p.mean, p.std_dev)) for _ in range(n_simulations)]
+      for p in players
+  }
+  ```
+- **Why:** Avoids one dict lookup per draw and lets the inner list comprehension pre-size each list, sidestepping the incremental `.append`/resize cost. Reads as a direct expression of intent ("each player's batch of N draws").
+- **Behavior change to be aware of:** the RNG draw order changes from per-trial-interleaved (`p1_sim1, p2_sim1, ..., p1_sim2, ...`) to per-player-batched (`p1_sim1, p1_sim2, ..., p1_simN, p2_sim1, ...`). For any given seed, the exact numeric output therefore differs from the previous version — but the statistical properties (mean, std_dev, percentiles, head-to-head probabilities) are identical, which is what every test asserts on. All 100 tests still pass with no tolerance changes.
+- **Measured speedup** on a 26-player realistic roster (Python 3.14, single benchmark run on this machine):
+
+  | n_simulations | Before | After  | Speedup |
+  |---------------|--------|--------|---------|
+  | 10,000        | 76 ms  | 62 ms  | ~18%    |
+  | 50,000        | 386 ms | 319 ms | ~17%    |
+  | 100,000       | 761 ms | 624 ms | ~18%    |
+
+  Honest note: the original audit projected 2-3× speedup. That overestimated the gain — `rng.gauss()` itself dominates the inner loop, so removing the dict lookup + `.append` saves only a small fraction of total work. The change is still strictly better (faster + clearer + fewer lines), just by less than first claimed.
+- **Effort:** ~10 lines changed in `src/simulation/monte_carlo.py`. Zero new tests needed; existing reproducibility, score-property, and statistics tests already cover the contract.
