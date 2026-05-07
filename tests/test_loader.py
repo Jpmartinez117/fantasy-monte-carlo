@@ -1,5 +1,7 @@
 """Unit tests for the CSV data loader."""
 
+from pathlib import Path
+
 import pytest
 from src.data_loader.base import DataLoadError
 from src.data_loader.csv_loader import CsvPlayerProvider, _parse_csv
@@ -198,3 +200,49 @@ class TestBadFile:
     def test_missing_file_raises(self):
         with pytest.raises(DataLoadError, match="not found"):
             CsvPlayerProvider("data/no_such_file.csv").load_players()
+
+
+# ---------------------------------------------------------------------------
+# File-level encoding edge cases (bug fixes #1, #2, #7)
+# ---------------------------------------------------------------------------
+
+class TestFileEncoding:
+    def test_utf8_bom_at_start_of_file_is_handled(self, tmp_path: Path):
+        """Files saved by Excel / Notepad++ often begin with a UTF-8 BOM.
+        The loader must strip it transparently, not reject the header."""
+        p = tmp_path / "with_bom.csv"
+        # ﻿ is the BOM; encoding it as UTF-8 produces the EF BB BF byte sequence.
+        content = "﻿Name,Position,Mean,StdDev\nJosh Harper,QB,24.5,4.8\n"
+        p.write_bytes(content.encode("utf-8"))
+
+        players = CsvPlayerProvider(p).load_players()
+        assert len(players) == 1
+        assert players[0].name == "Josh Harper"
+
+    def test_non_utf8_file_raises_friendly_error(self, tmp_path: Path):
+        """A file with non-UTF-8 bytes should produce a DataLoadError with a
+        clear message instead of a UnicodeDecodeError traceback."""
+        p = tmp_path / "cp1252.csv"
+        # \xe9 is é in cp1252 / latin-1 but is an invalid lone start byte in UTF-8.
+        p.write_bytes(b"Name,Position,Mean,StdDev\nJos\xe9 Harper,QB,24.5,4.8\n")
+
+        with pytest.raises(DataLoadError, match="UTF-8"):
+            CsvPlayerProvider(p).load_players()
+
+
+class TestEmbeddedNewlines:
+    def test_quoted_field_with_embedded_newline_parses_as_one_row(self):
+        """A quoted field containing a newline should be treated as a single
+        cell — not split across two rows that each fail column-count validation.
+        (Bug #7: previously csv.reader was fed pre-split lines via splitlines().)"""
+        # Quoted name spans two physical lines but is logically one field.
+        text = (
+            'Name,Position,Mean,StdDev\n'
+            '"Smith\nJr.",QB,24.5,4.8\n'
+        )
+        players, warnings = _parse_csv(text)
+
+        # The row parses as exactly one player with no column-count warnings.
+        assert len(players) == 1
+        assert "Smith" in players[0].name
+        assert not any("column count" in w for w in warnings)

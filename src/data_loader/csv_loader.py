@@ -1,6 +1,7 @@
 """CSV implementation of PlayerDataProvider."""
 
 import csv
+import io
 import math
 from pathlib import Path
 from typing import List, Tuple
@@ -34,7 +35,17 @@ class CsvPlayerProvider(PlayerDataProvider):
             raise DataLoadError(f"File not found: {self._path}")
 
         try:
-            raw_text = self._path.read_text(encoding="utf-8")
+            # utf-8-sig transparently strips a UTF-8 BOM if present.  Excel,
+            # Google Sheets, and Notepad++ all add a BOM by default, so this
+            # silently accepts those exports instead of failing the header check.
+            raw_text = self._path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError as exc:
+            # Convert the cryptic UnicodeDecodeError into a DataLoadError so
+            # the CLI surfaces a friendly message instead of a traceback.
+            raise DataLoadError(
+                f"File is not valid UTF-8: {self._path}. "
+                f"Re-save the CSV as UTF-8 and try again."
+            ) from exc
         except OSError as exc:
             raise DataLoadError(f"Cannot read file {self._path}: {exc}") from exc
 
@@ -58,7 +69,11 @@ def _parse_csv(text: str) -> Tuple[List[Player], List[str]]:
     warnings: List[str] = []
     seen: set = set()  # (name, position) pairs already accepted
 
-    reader = csv.reader(text.splitlines())
+    # Feed the reader a file-like object instead of a pre-split list of lines.
+    # csv.reader needs the underlying stream to correctly join multi-line
+    # quoted fields (e.g. "Smith\nJr.") into a single cell.  reader.line_num
+    # gives the actual file line number for accurate warning messages.
+    reader = csv.reader(io.StringIO(text))
 
     # -- Header ---------------------------------------------------------------
     try:
@@ -72,7 +87,11 @@ def _parse_csv(text: str) -> Tuple[List[Player], List[str]]:
         )
 
     # -- Data rows ------------------------------------------------------------
-    for line_num, raw_row in enumerate(reader, start=2):  # header was line 1
+    for raw_row in reader:
+        # reader.line_num is the file-line number of the row we just consumed
+        # (1-based, header was line 1).  Using it instead of an enumerate
+        # counter keeps line numbers correct even for multi-line quoted fields.
+        line_num = reader.line_num
         if not any(raw_row):  # skip blank lines
             continue
         if len(raw_row) != 4:

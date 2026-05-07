@@ -216,3 +216,26 @@ Closed the only remaining MVP gap: prior to this task, every layer below the CLI
   - Duplicate `(Name, Position)` — loader keeps first occurrence and warns on subsequent matches.
   - "Collapse multiple internal spaces in Name" is documented as **optional** in the spec and is intentionally not implemented (only `.strip()` is applied). Spec wording is already accurate.
 - **Result:** SCHEMA.md is fully aligned with current loader behavior. No edits required.
+
+### Task 5 — Bug Fixes from Audit (round 1)
+
+A whole-project audit identified five small bugs and three robustness gaps. This round closes the three CSV-loader issues, which all live in the same file-read pipeline and were cleanest to fix together.
+
+#### Fix #1. UTF-8 BOM at start of file no longer breaks the header check
+- **Bug:** Files saved by Excel, Google Sheets, or Notepad++ start with a UTF-8 BOM (`﻿`). Reading with `encoding="utf-8"` made the first header field decode as `"﻿Name"`, which failed `EXPECTED_HEADER` comparison and raised `DataLoadError("Bad header: ...")` even though the file was valid.
+- **Fix:** `src/data_loader/csv_loader.py` now reads with `encoding="utf-8-sig"`, which transparently strips the BOM if present and otherwise behaves identically to UTF-8.
+- **New test:** `TestFileEncoding::test_utf8_bom_at_start_of_file_is_handled` writes a BOM-prefixed CSV via `tmp_path` and asserts the player loads cleanly.
+
+#### Fix #2. Non-UTF-8 files now raise a friendly `DataLoadError` instead of a traceback
+- **Bug:** A CSV saved as cp1252/latin-1 (default for many Windows tools) raised a raw `UnicodeDecodeError` from `Path.read_text`. The exception was uncaught and surfaced as a Python traceback to the user.
+- **Fix:** `load_players()` now catches `UnicodeDecodeError` and re-raises as `DataLoadError("File is not valid UTF-8: ... Re-save the CSV as UTF-8 and try again.")`. The CLI's existing `DataLoadError` handler then prints `[ERROR] ...` and exits cleanly with status 1.
+- **New test:** `TestFileEncoding::test_non_utf8_file_raises_friendly_error` writes raw cp1252 bytes via `tmp_path` and asserts a `DataLoadError` matching `"UTF-8"`.
+
+#### Fix #7. Quoted multi-line fields are now parsed correctly
+- **Bug:** `_parse_csv` previously called `csv.reader(text.splitlines())`, which pre-splits the file into individual lines before the CSV parser sees it. A quoted field containing a literal newline (e.g. `"Smith\nJr."`) was therefore broken into two rows, each failing column-count validation.
+- **Fix:** Now uses `csv.reader(io.StringIO(text))`, which preserves embedded newlines inside quoted fields. As a side benefit, `reader.line_num` is used for warning line numbers — equivalent for one-line rows, but more accurate when a row spans multiple physical lines.
+- **New test:** `TestEmbeddedNewlines::test_quoted_field_with_embedded_newline_parses_as_one_row` confirms the row is treated as a single cell with no spurious column-count warnings.
+
+#### Test suite totals
+- Before round-1 fixes: 82 tests passing
+- After round-1 fixes: **85 tests passing** (+3 new loader tests). All previously-passing tests still pass — the change is fully backward compatible.
