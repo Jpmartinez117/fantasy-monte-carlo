@@ -402,3 +402,116 @@ The collaboration with AI throughout this optimization pass followed the **CLEAR
 - **R — Refinements.** Mid-implementation refinements happened twice. (1) The O1 speedup claim was corrected from "2-3×" to "~18%" after benchmarking — the README explicitly records the original projection and the honest measured number side by side. (2) The recommended subset was narrowed from the 8 candidates to 5: O1, O2, R1, R2, R3 were applied; M1, M2, M3 were explicitly deferred or skipped, with the reason recorded for each.
 
 The net result: five low-risk optimizations applied across five commits, every change behavior-preserving, every change covered by the existing 100-test suite without modification.
+
+### Task 9 — Security Audit & Defensive Hardening
+
+Performed a security review of the entire codebase across four categories: missing input validation, hardcoded secrets, overly permissive logic, and lack of error handling. Honest preface: this is an offline single-user CLI tool with no network, no auth, no `eval`/`subprocess`/`pickle`, and no SQL — the realistic attack surface is small. Most "security" findings turned out to be denial-of-service or robustness gaps, not exploitable vulnerabilities.
+
+#### What's clean (verified, no changes needed)
+- **Hardcoded secrets:** none. The project has no auth or network code, so there's nothing to leak.
+- **Code injection** (eval, exec, subprocess on user input, pickle): none.
+- **Path traversal** in `--file`: not a vulnerability, since the user runs the tool on their own machine and supplies their own paths.
+- **CSV input validation:** already strong — header, column count, range bounds, NaN/Inf rejection, encoding errors handled, duplicates detected, position whitelist.
+- **CLI argparse:** strong — `type=int`, `choices`, mutual-exclusion, positive-value guards.
+- **Draft REPL:** strong post-fix — EOF/Ctrl-C handled, empty input handled, `isdigit` check before integer coercion.
+
+#### Findings ranked + fixes applied
+
+##### S1 (Medium) — `--sims` upper bound
+- **Issue:** `--sims` was unbounded. A typo like `--sims 99999999999` would attempt to allocate trillions of floats and crash with `MemoryError` partway through. Not exploitable, but a footgun.
+- **Fix:** Added `MAX_SIMS = 10_000_000` constant in `src/cli/main.py` and a corresponding argparse-level check that converts overshoots into a friendly error before any allocation happens.
+- **New test:** `TestSecurityGuards::test_sims_above_ceiling_rejected_by_argparse` asserts exit code 2 and that the cap value appears in the error message.
+
+##### S2 (Low–Medium) — `--h2h` roster size cap
+- **Issue:** Each `--h2h` team list was unbounded. Pasting an entire ranking into one argument (e.g. accidentally) would force a multi-second h2h computation against pointless data.
+- **Fix:** Added `MAX_ROSTER_SIZE = 50` constant and a check at the top of `_run_h2h` that prints `[ERROR] Team A has N players (maximum allowed is 50)` and exits 1 if either roster is over the cap. 50 is several times a real fantasy roster, so legitimate use is never affected.
+- **New test:** `TestSecurityGuards::test_h2h_oversized_roster_rejected` builds a 51-name roster and asserts the friendly error and exit code 1.
+
+##### S3 (Low) — defensive empty-list guards in stats
+- **Issue:** `_percentile([], …)` would raise `IndexError` on the `sorted_values[-1]` fallback. `compute_stats` would silently produce a `PlayerStats` with garbage if any player's score list was empty. Both unreachable today (the simulation enforces `n_simulations >= 1`), but the failure mode would be cryptic if the contract changed.
+- **Fix:** Added explicit `ValueError("Cannot compute percentile of an empty list")` in `_percentile` and `ValueError("No simulated scores for player {name!r} ...")` in `compute_stats`.
+- **New tests:** `TestPercentile::test_empty_list_raises_value_error` and `TestComputeStatsEmptyGuard::test_empty_scores_for_player_raises` — the latter hand-builds a degenerate `SimulationResults` to exercise the guard directly.
+
+#### Findings explicitly skipped (not worth fixing for an offline CLI)
+- **S4 (Low)** — no max CSV file size: would be relevant only if the tool grew network or untrusted-input ingestion paths. Premature for the current use case.
+- **S5 (Negligible)** — no max length on player name: cosmetic at worst.
+
+#### Test suite totals
+- Before security audit: 100 tests passing
+- After security audit: **104 tests passing** (+2 CLI subprocess guards + 1 percentile guard + 1 compute_stats guard). Backward compatible.
+
+#### Security risk audit summary
+| # | Severity | Status |
+|---|---|---|
+| S1 — `--sims` unbounded | Medium | ✅ fixed |
+| S2 — `--h2h` roster unbounded | Low–Medium | ✅ fixed |
+| S3 — empty-input crash in stats | Low | ✅ fixed |
+| S4 — no max CSV size | Low | ⏭ skipped (out of scope for offline CLI) |
+| S5 — no max name length | Negligible | ⏭ skipped (cosmetic) |
+
+The codebase passes the four-category security audit. No exploitable vulnerabilities were present — the closest items were resource-exhaustion footguns, all now bounded.
+
+---
+
+## Deferred Items, Stretch Features & Future Work
+
+A consolidated index of everything that was considered during MVP-1 work but intentionally not implemented. Each item is recorded with a reason so future-me (or anyone else) doesn't have to re-derive the decision. Nothing here is a correctness gap in MVP-1 — these are scope-bounded "knowns."
+
+### A. Stretch features (excluded from MVP-1 by original spec)
+
+These were called out as out-of-scope from day one. Listed here as the natural next-feature roadmap:
+
+| Feature | Notes for future work |
+|---|---|
+| **Historical player data ingestion** | The most useful stretch item — would replace fake/projected `mean` and `std_dev` with empirically-derived values from past weekly fantasy points. Recommended path: `nfl_data_py` (a Python wrapper around nflverse). New module like `src/data_loader/historical_loader.py` that fetches per-player weekly history and writes a properly-formatted CSV. The existing CSV-based simulation core stays untouched. |
+| **Live API integration** | Sleeper API is free and unauthenticated but exposes player metadata, not projections. ESPN/Yahoo require OAuth and are non-trivial. Not worth the auth/deps complexity unless the historical pipeline is already in place. |
+| **Injury simulation** | Add a per-player `injury_rate` field, then in each simulation trial Bernoulli-sample whether the player plays before sampling their score. Would change the CSV schema (one new column) and the Monte Carlo loop. |
+| **Positional scarcity modeling** | Adjust ranking/draft recommendation by "Value Over Replacement" — how much better is this RB than the worst-startable RB? Mostly a stats-layer change, not a simulation change. |
+| **Visualization charts** | The simulation already produces all the data needed for histograms, boom/bust scatter, etc. Would add a plotting dependency (matplotlib or plotly). Currently the percentile table communicates the same info textually. |
+| **GUI interface** | A tk/PyQt frontend over the same engine. Would not change `src/` at all if it consumes the existing `compute_stats` / `head_to_head` / `run_simulation` API. |
+
+### B. Real-data ingestion paths (discussed, not built)
+
+When the question "how do I use this with real player data?" came up, three options were sketched. Recording them here so the analysis isn't lost:
+
+- **Option A — Manual export from a projections site (~30 min, lowest effort).** Pull season-long projections from FantasyPros / ESPN / Sleeper, divide by 17 to get weekly mean. Approximate `StdDev` as a fraction of mean (~0.25 × mean for QBs, ~0.30 × mean for RB/WR/TE). Quality: rough but defensible.
+- **Option B — Historical-derived stats (best quality, a few hours).** Use `nfl_data_py` to pull last season's weekly fantasy points per player; compute `mean` and `std_dev` empirically from each player's weekly score history. Quality: real volatility from real data. Natural fit for the "Historical player data ingestion" stretch feature.
+- **Option C — Live API (days of work).** Sleeper API is free but doesn't return projections; ESPN/Yahoo require OAuth. Not worth pursuing standalone.
+
+### C. Optimization audit — deferred items
+
+From the optimization pass, three candidates were rated "good in principle, not worth it now":
+
+- **M1 — Decouple loader I/O from data loading.** `CsvPlayerProvider.load_players()` directly calls `print(f"[WARNING] {w}")`, coupling I/O to data parsing. A library user can't suppress or redirect. Tests already work around this by calling `_parse_csv` directly. The minimal future fix is to expose a public `parse_csv_text(text)` that returns `(players, warnings)` and let callers decide how to surface warnings. Real change for a library/CLI separation; pre-mature for the current single-CLI consumer.
+- **M2 — Switch from `csv.reader` to `csv.DictReader`.** Would remove the manual `dict(zip(EXPECTED_HEADER, raw_row))` step, but `DictReader`'s failure modes (extra columns get joined under a `None` key; missing get `None` values) would force re-validation of all column-count tests. Marginal gain for a real test rewrite.
+- **M3 — Share test fixtures via `tests/conftest.py`.** Each test file defines its own roster with names tuned to that file's assertions ("Elite QB" / "Weak QB" in `test_h2h.py` makes the tests read cleanly). Hoisting them up would actually hurt readability.
+
+### D. Security audit — deferred items
+
+- **S4 — No max CSV file size.** A 50GB CSV would exhaust RAM via `read_text()`. Would matter if the tool ever ingested untrusted input or grew a network surface. Pre-mature for an offline CLI on user-supplied data.
+- **S5 — No max length on player name.** Cosmetic at worst — a 10MB name field produces an ugly table. No correctness impact.
+
+### E. Known accepted limitations (not bugs, intentional)
+
+These came up during audits and were explicitly characterized as design trade-offs rather than fixes-in-waiting:
+
+- **Clamping bias in the Monte Carlo loop.** `max(0.0, rng.gauss(mean, std_dev))` is technically a truncated normal, so the sample mean of clamped scores is slightly higher than the parameter mean. For realistic projection ranges (mean 9–25, std_dev 2.4–5.2 in our dataset) the bias is well under 0.5 points — tests already allow ±0.5 tolerance. Becomes wrong-feeling only for very-low-mean / high-stddev edge cases. A proper fix would use `scipy.stats.truncnorm`, which adds a dependency for a sub-percent improvement.
+- **Em-dash renders as `?` when stdout is piped on Windows.** The `—` character in `"Remaining depth —"` is a single byte (0x97) in cp1252, which is invalid UTF-8. Visible only when output is redirected; interactive terminal output is fine. Test infrastructure works around it by setting `PYTHONIOENCODING=utf-8` on the subprocess env. Real fix would be to replace em-dashes with ASCII hyphens in user-facing strings, but that's a stylistic loss for a marginal-case issue.
+- **Pure-Python simulation loop.** A NumPy rewrite of `run_simulation` would be 50–100× faster (single vectorized `np.random.normal` call clamped with `np.maximum`). Currently 10,000 sims × 26 players takes ~62 ms post-O1 — already imperceptible. Adding NumPy as a runtime dependency for a scenario nobody is hitting is the wrong trade. If the user routinely runs `--sims 1_000_000+`, revisit.
+
+### F. Quality / tooling improvements not pursued
+
+- **Test parametrization.** `TestInvalidRows` in `test_loader.py` repeats the same pattern across ~10 cases. Could be `@pytest.mark.parametrize`'d to ~3 lines. Each test is independently meaningful as-is and the test names read naturally — left alone deliberately.
+- **Coverage measurement.** Not currently set up. `pytest-cov` is a one-line dev dependency; useful as the codebase grows.
+- **Type checking.** `mypy` isn't set up. Type hints exist throughout the codebase and are correct; running mypy in CI would pin them in place.
+- **CI pipeline.** No GitHub Actions / pre-commit hooks. For a single-developer project this is fine; would be the next thing to add for a team.
+
+### G. Things worth knowing now
+
+A short list of project-shape facts that aren't obvious from any single file:
+
+- The package boundary is intentional: every subpackage with public symbols re-exports them via `__all__`. Internal call sites currently import from full module paths instead of going through the package. The re-exports exist for *future* external consumers — they are not vestigial.
+- `cli/main.py` and `cli/draft_session.py` have a circular dependency at the function level (each calls into the other). It is broken via lazy in-function imports of `print_table`. The `VALID_POSITIONS` import in `draft_session.py` was *not* part of that cycle and was hoisted to module level (Opt R3). Don't re-defer it without a real reason.
+- The simulation's RNG draw order is per-player-batched (post-O1), not per-trial-interleaved. Same-seed reproducibility is preserved within the new code, but exact numeric output for any given seed differs from pre-O1 versions. All tests assert on statistical properties, not pinned values.
+- Warnings from the CSV loader are printed to stdout (not stderr) because the CLI's `[ERROR]` path also uses stdout — keeping them on the same stream avoids interleaving issues when the user redirects either one. If the loader gets decoupled (M1), revisit this.
+- `data/players_bad.csv` is intentional — it is not bad data left behind, it is the regression fixture for `TestBadFile` in `test_loader.py`.

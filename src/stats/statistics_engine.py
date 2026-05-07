@@ -57,6 +57,15 @@ def compute_stats(results: SimulationResults, players: List[Player]) -> List[Pla
 
     stats_list: List[PlayerStats] = []
     for name, scores in results.scores.items():
+        # Defensive: `_percentile` and the statistics module both fail
+        # ungracefully on empty input.  In practice run_simulation guarantees
+        # at least one score per player, but checking here gives a clear
+        # error if that contract is ever violated.
+        if not scores:
+            raise ValueError(
+                f"No simulated scores for player {name!r} — cannot compute stats"
+            )
+
         # Sort once here; _percentile() expects a sorted list
         sorted_scores = sorted(scores)
 
@@ -169,8 +178,17 @@ def _percentile(sorted_values: List[float], pct: int) -> float:
         pct:           Integer percentile in range [0, 100].
 
     Example: pct=90 on a 10,000-element list → index 8999.0 → last full value.
+
+    Raises:
+        ValueError: If sorted_values is empty.
     """
     n = len(sorted_values)
+    # Defensive: previously this would raise IndexError on the
+    # `sorted_values[-1]` fallback when n=0.  Today the upstream simulation
+    # guarantees n >= 1, so this is a contract guard, not a real failure
+    # mode — but it surfaces a clear error if a future caller violates it.
+    if n == 0:
+        raise ValueError("Cannot compute percentile of an empty list")
 
     # Map the percentile to a fractional index along the sorted list
     idx = (pct / 100) * (n - 1)

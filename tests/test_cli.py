@@ -213,6 +213,33 @@ class TestFailurePaths:
 
 
 # ---------------------------------------------------------------------------
+# Security guards (S1, S2)
+# ---------------------------------------------------------------------------
+
+class TestSecurityGuards:
+    def test_sims_above_ceiling_rejected_by_argparse(self, csv_path: Path):
+        """S1 — `--sims 99999999999` must fail at argparse before any
+        memory is allocated.  Exit code 2 is argparse's error convention."""
+        result = run_cli("--file", str(csv_path), "--sims", "99999999999")
+        assert result.returncode == 2
+        # The bound is reflected in stderr so the user knows the cap
+        assert "10,000,000" in result.stderr or "10000000" in result.stderr
+
+    def test_h2h_oversized_roster_rejected(self, csv_path: Path):
+        """S2 — pasting an enormous roster into a --h2h argument should
+        be caught with a clear error before any simulation work happens."""
+        # 51 names — one over the MAX_ROSTER_SIZE=50 cap
+        huge_team = ",".join(f"Player{i}" for i in range(51))
+        result = run_cli(
+            "--file", str(csv_path), "--sims", "100",
+            "--h2h", huge_team, "Alpha QB",
+        )
+        assert result.returncode == 1
+        assert "Team A has 51 players" in result.stdout
+        assert "maximum allowed" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # Draft session subprocess tests (bug fixes #3 and #6)
 # ---------------------------------------------------------------------------
 

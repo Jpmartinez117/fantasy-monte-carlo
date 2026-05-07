@@ -20,6 +20,13 @@ from src.stats.statistics_engine import PlayerStats, compute_stats, head_to_head
 DEFAULT_CSV = "data/players.csv"
 DEFAULT_SIMS = 10_000
 
+# Hard upper bounds to turn cryptic resource-exhaustion crashes into friendly
+# argparse / CLI errors.  Both ceilings sit well past any realistic use:
+# 10M simulations is several minutes of pure-Python work, and 50 players is
+# already 4-5x a normal fantasy roster.
+MAX_SIMS = 10_000_000
+MAX_ROSTER_SIZE = 50
+
 
 def main() -> None:
     args = _parse_args()
@@ -88,6 +95,18 @@ def _run_h2h(h2h_args: list[str], results, players) -> None:
     """Parse the two roster strings and print a head-to-head matchup report."""
     team_a_names = [n.strip() for n in h2h_args[0].split(",")]
     team_b_names = [n.strip() for n in h2h_args[1].split(",")]
+
+    # Reject obviously oversized rosters early.  A real fantasy roster is
+    # 8-12 starters; anything past MAX_ROSTER_SIZE is almost certainly a
+    # paste error (e.g. an entire ranking copied into one --h2h argument)
+    # and would otherwise just waste simulation work.
+    for label, names in (("Team A", team_a_names), ("Team B", team_b_names)):
+        if len(names) > MAX_ROSTER_SIZE:
+            print(
+                f"[ERROR] {label} has {len(names)} players "
+                f"(maximum allowed is {MAX_ROSTER_SIZE})"
+            )
+            sys.exit(1)
 
     # Validate that every name appears in the simulation results
     known = set(results.scores.keys())
@@ -193,9 +212,13 @@ def _parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
-    # Validate sims is positive
+    # Validate sims is positive and below the safety ceiling.  The upper
+    # bound prevents a typo like `--sims 999999999` from triggering a
+    # MemoryError partway through allocation.
     if args.sims < 1:
         parser.error(f"--sims must be >= 1, got {args.sims}")
+    if args.sims > MAX_SIMS:
+        parser.error(f"--sims must be <= {MAX_SIMS:,}, got {args.sims:,}")
 
     # Validate --top is positive if provided
     if args.top is not None and args.top < 1:

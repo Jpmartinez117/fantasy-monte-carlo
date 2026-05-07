@@ -55,6 +55,15 @@ class TestPercentile:
     def test_single_element_list(self):
         assert _percentile([42.0], 50) == 42.0
 
+    # --- S3: defensive guard on empty input -------------------------------
+
+    def test_empty_list_raises_value_error(self):
+        """Previously this raised IndexError on the sorted_values[-1]
+        fallback.  Now it surfaces a clear ValueError so future callers
+        that violate the non-empty contract get a meaningful message."""
+        with pytest.raises(ValueError, match="empty"):
+            _percentile([], 50)
+
 
 # ---------------------------------------------------------------------------
 # compute_stats
@@ -102,6 +111,21 @@ class TestComputeStats:
 # ---------------------------------------------------------------------------
 # rank_players
 # ---------------------------------------------------------------------------
+
+class TestComputeStatsEmptyGuard:
+    """S3 — compute_stats should fail clearly if a player has no scores."""
+
+    def test_empty_scores_for_player_raises(self, two_players):
+        # Hand-build a SimulationResults that violates the
+        # "at least one score per player" invariant.
+        from src.simulation.monte_carlo import SimulationResults
+        broken_results = SimulationResults(
+            scores={"Alpha": [], "Beta": []},
+            n_simulations=0,
+        )
+        with pytest.raises(ValueError, match="No simulated scores"):
+            compute_stats(broken_results, two_players)
+
 
 class TestRankPlayers:
     def test_sorted_descending_by_mean(self, two_players, two_player_results):
