@@ -5,6 +5,14 @@ from dataclasses import dataclass
 
 VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
+# Single source of truth for the legal numeric ranges of a Player's stats.
+# Both the model's __post_init__ and the CSV loader's row validation import
+# from here so a tuning change to one rule cannot drift the other.
+MIN_MEAN = 0
+MAX_MEAN = 60
+MIN_STD_DEV = 0
+MAX_STD_DEV = 25
+
 
 @dataclass(frozen=True)
 class Player:
@@ -33,10 +41,14 @@ class Player:
             raise ValueError(
                 f"Invalid position {self.position!r}. Must be one of {sorted(VALID_POSITIONS)}"
             )
-        if not (0 <= self.mean <= 60):
-            raise ValueError(f"Mean must be between 0 and 60, got {self.mean}")
-        if not (0 <= self.std_dev <= 25):
-            raise ValueError(f"StdDev must be between 0 and 25, got {self.std_dev}")
+        if not (MIN_MEAN <= self.mean <= MAX_MEAN):
+            raise ValueError(
+                f"Mean must be between {MIN_MEAN} and {MAX_MEAN}, got {self.mean}"
+            )
+        if not (MIN_STD_DEV <= self.std_dev <= MAX_STD_DEV):
+            raise ValueError(
+                f"StdDev must be between {MIN_STD_DEV} and {MAX_STD_DEV}, got {self.std_dev}"
+            )
 
     def __str__(self):
         return f"{self.name} ({self.position}) — mean={self.mean}, std_dev={self.std_dev}"

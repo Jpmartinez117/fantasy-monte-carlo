@@ -6,7 +6,14 @@ import math
 from pathlib import Path
 from typing import List, Tuple
 
-from src.models.player import Player, VALID_POSITIONS
+from src.models.player import (
+    MAX_MEAN,
+    MAX_STD_DEV,
+    MIN_MEAN,
+    MIN_STD_DEV,
+    Player,
+    VALID_POSITIONS,
+)
 from src.data_loader.base import PlayerDataProvider, DataLoadError
 
 EXPECTED_HEADER = ["Name", "Position", "Mean", "StdDev"]
@@ -144,11 +151,15 @@ def _validate_row(row: dict, line_num: int) -> Player:
     mean = _parse_float(mean_raw, "Mean", line_num)
     std_dev = _parse_float(stddev_raw, "StdDev", line_num)
 
-    if not (0 <= mean <= 60):
-        raise ValueError(f"Line {line_num}: Mean {mean} out of range (0–60)")
+    if not (MIN_MEAN <= mean <= MAX_MEAN):
+        raise ValueError(
+            f"Line {line_num}: Mean {mean} out of range ({MIN_MEAN}–{MAX_MEAN})"
+        )
 
-    if not (0 <= std_dev <= 25):
-        raise ValueError(f"Line {line_num}: StdDev {std_dev} out of range (0–25)")
+    if not (MIN_STD_DEV <= std_dev <= MAX_STD_DEV):
+        raise ValueError(
+            f"Line {line_num}: StdDev {std_dev} out of range ({MIN_STD_DEV}–{MAX_STD_DEV})"
+        )
 
     return Player(name=name, position=position, mean=mean, std_dev=std_dev)
 

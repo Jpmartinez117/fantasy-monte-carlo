@@ -351,3 +351,9 @@ A whole-codebase audit identified eight low-risk improvements across performance
   Much bigger win than O1 because the old code's redundant dict lookups dominated the trial loop, whereas in `run_simulation` the `rng.gauss()` call dominated.
 - **Behavior:** Identical to before — same totals, same H2HResult fields. All 100 tests pass unchanged.
 - **Effort:** ~10 lines changed in `src/stats/statistics_engine.py`.
+
+#### Opt #R1. Numeric range bounds extracted to named constants
+- **What:** The legal range for a Player's `mean` (0–60) and `std_dev` (0–25) was hard-coded in two places: `Player.__post_init__` in `src/models/player.py` and `_validate_row` in `src/data_loader/csv_loader.py`. Tuning either side without the other would have left the loader and the model disagreeing on what's valid. Now `player.py` defines four module-level constants (`MIN_MEAN`, `MAX_MEAN`, `MIN_STD_DEV`, `MAX_STD_DEV`) and both files import and reference them in their bounds checks and error messages.
+- **Why:** Single source of truth. Changing `MAX_MEAN` from 60 to 70 (e.g. for a different scoring rule) is now a one-line edit, and the loader's error message stays in sync automatically.
+- **Behavior:** Identical to before — same accept/reject behavior on every input, error messages still embed the same numeric bounds (just sourced from the constants now). All 100 tests pass unchanged.
+- **Effort:** ~15 lines across two files. No new tests needed; the existing range-boundary tests in `test_player.py` and `test_loader.py` already cover both sides.
