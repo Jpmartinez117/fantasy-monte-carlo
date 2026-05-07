@@ -30,4 +30,3 @@ class PlayerDataProvider(ABC):
 
 class DataLoadError(Exception):
     """Raised when a data provider fails to load player data."""
-1
