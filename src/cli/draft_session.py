@@ -2,6 +2,7 @@
 
 from typing import List
 
+from src.models.player import VALID_POSITIONS
 from src.stats.statistics_engine import PlayerStats
 
 
@@ -102,8 +103,6 @@ def _display_board(available: List[PlayerStats]) -> None:
 
 def _display_position_summary(available: List[PlayerStats]) -> None:
     """Print a quick count of remaining players per position."""
-    from src.models.player import VALID_POSITIONS
-
     counts = {pos: 0 for pos in sorted(VALID_POSITIONS)}
     for p in available:
         counts[p.position] = counts.get(p.position, 0) + 1

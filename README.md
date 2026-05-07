@@ -363,3 +363,42 @@ A whole-codebase audit identified eight low-risk improvements across performance
 - **Why:** Eliminated the two-format-strings-must-stay-in-sync hazard (any column-width tweak previously had to be applied four places to stay aligned). Function is now ~15 lines shorter and reads top-to-bottom without an `if/else` straddle. Verified visually that both modes still produce perfectly aligned tables — rankings table (with `Rank` column) and draft recap (without).
 - **Behavior:** Identical visual output in both modes. All 100 tests pass; manual CLI smoke test (`python -m src.cli.main --top 3` and `--draft`) confirms identical alignment to before.
 - **Effort:** ~15 net lines deleted in `src/cli/main.py`. No new tests needed; the existing CLI subprocess tests assert on table content (header strings, player names, rank ordering) which all still pass.
+
+#### Opt #R3. Hoisted `VALID_POSITIONS` import in `draft_session.py`
+- **What:** `src/cli/draft_session.py::_display_position_summary` was doing a deferred `from src.models.player import VALID_POSITIONS` inside the function body. Moved that import to the top of the module alongside the other top-level imports.
+- **Why:** Top-level imports are this codebase's default style. The lazy import had no circular-dependency justification (`src.models.player` does not import from anything in `src.cli`); it was just a copy-paste from the *other* lazy import in the same file (`from src.cli.main import print_table`), which **does** need to stay deferred to break the `cli.main` ↔ `cli.draft_session` cycle. The two imports were structurally different even though they looked similar — the refactor fixes that.
+- **Behavior:** Identical. All 100 tests pass. Module load time is fractionally shorter (one fewer deferred import resolution per draft pick) but the gain is invisible in practice.
+- **Effort:** Moved 1 import line. Removed the inline comment. Net 1 line less.
+
+#### Closeout
+With O1, O2, R1, R2, and R3 done, the recommended optimization subset is complete:
+
+| Item | Source files | Visible win |
+|---|---|---|
+| O1 — Monte Carlo loop inversion | `simulation/monte_carlo.py` | ~18% faster simulation |
+| O2 — head_to_head zip transpose | `stats/statistics_engine.py` | ~2.25× faster h2h |
+| R1 — extract range constants | `models/player.py`, `data_loader/csv_loader.py` | single source of truth |
+| R2 — collapse `print_table` paths | `cli/main.py` | ~15 lines deleted, no parallel formats |
+| R3 — hoist `VALID_POSITIONS` import | `cli/draft_session.py` | conventional import style |
+
+The deferred items (M1: decouple loader I/O; M2: switch to `csv.DictReader`; M3: shared test fixtures via `conftest.py`) are documented in this section's earlier audit list as known smells to revisit post-MVP, not now. None of them are correctness issues — they're either coupling-style concerns the existing tests already work around, or refactors whose payoff doesn't justify rewriting working tests.
+
+#### Optimization summary & how the CLEAR checklist guided this work
+
+A compact recap of the five optimizations applied:
+
+1. **O1 — Monte Carlo loop inversion.** Replaced nested `for sim: for player: append` with a single dict comprehension that builds each player's full sample list in one pass. ~18% faster.
+2. **O2 — `head_to_head` zip transpose.** Hoisted `results.scores[name]` lookups out of the trial loop and used `zip(*lists)` to transpose into per-trial tuples. ~2.25× faster.
+3. **R1 — Range constants.** Extracted `MIN_MEAN`, `MAX_MEAN`, `MIN_STD_DEV`, `MAX_STD_DEV` to `models/player.py`; both the model's `__post_init__` and the loader's `_validate_row` now reference them.
+4. **R2 — `print_table` consolidation.** Collapsed two parallel format paths (with/without rank column) into a single shared format string with a computed prefix. ~15 lines deleted.
+5. **R3 — Hoisted `VALID_POSITIONS` import.** Moved a lazy in-function import in `draft_session.py` to the module's top-of-file imports.
+
+The collaboration with AI throughout this optimization pass followed the **CLEAR** checklist:
+
+- **C — Context.** The AI was given the post-bug-fix state of the codebase: 100 tests passing, MVP-1 functionally complete, every module already audited. It read each source file before proposing changes so suggestions targeted real lines rather than hypothetical patterns.
+- **L — Limits.** "Keep all suggestions within MVP 1 scope" was stated up front. That ruled out new dependencies (no NumPy), no new features (no async, no caching layer), and no stretch items (API integration, historical data, GUI). Every accepted optimization is a pure local rewrite of existing code.
+- **E — Examples.** Each proposal came with a concrete before/after code snippet and, where relevant, a measured benchmark (e.g., O1 was projected at 2-3× and benchmarked at ~18%; O2 was projected as "the better win" and benchmarked at ~2.25×). Examples replaced abstract claims so the cost/benefit was visible.
+- **A — Ask.** The original request was scoped to three dimensions — performance, readability, maintainability. The AI returned a categorized list of 8 candidates across those exact three buckets, each annotated with effort and a do/skip/defer recommendation, instead of a flat undifferentiated list.
+- **R — Refinements.** Mid-implementation refinements happened twice. (1) The O1 speedup claim was corrected from "2-3×" to "~18%" after benchmarking — the README explicitly records the original projection and the honest measured number side by side. (2) The recommended subset was narrowed from the 8 candidates to 5: O1, O2, R1, R2, R3 were applied; M1, M2, M3 were explicitly deferred or skipped, with the reason recorded for each.
+
+The net result: five low-risk optimizations applied across five commits, every change behavior-preserving, every change covered by the existing 100-test suite without modification.
