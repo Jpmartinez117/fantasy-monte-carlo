@@ -98,3 +98,27 @@ All six smoke tests below were executed against the real `data/players.csv` and 
 
 #### 2f. Missing CSV (`--file data/missing.csv`)
 - Printed `[ERROR] File not found: data\missing.csv` and exited with status code `1`. ✅ Pass.
+
+### Task 3 — CLI Test Coverage
+
+Closed the only remaining MVP gap: prior to this task, every layer below the CLI had unit tests but the CLI itself was only verified by manual smoke tests (Task 2). Added two new test files totaling 21 new tests; full suite now 82/82.
+
+#### 3a–3d. Subprocess-driven CLI tests (`tests/test_cli.py`)
+- **What:** New file invoking `python -m src.cli.main` as a subprocess against a small temporary CSV fixture (5 players). Each test asserts on exit code and a few load-bearing strings in stdout — smoke-only, since math correctness is already covered by simulation/stats unit tests.
+- **Tests added (13 total, organized into 4 classes):**
+  - `TestDefaultRankings` (3a) — exit code, "Loaded 5 players" message, table header + all player names present, rank #1 is the highest-mean player.
+  - `TestFilterAndSlice` (3b) — `--pos QB` includes only QBs, `--top 2` limits rows, combined `--pos QB --top 1` returns one player, position filter with no matches still exits 0 and warns.
+  - `TestHeadToHead` (3c) — `--h2h` happy path prints win-percentage summary; unknown player name fails with exit 1 and "Player not found".
+  - `TestFailurePaths` (3d) — missing file → exit 1 + "ERROR" + "not found"; `--sims 0` rejected by argparse (exit 2); `--draft` with `--h2h` rejected as mutually exclusive.
+- **Implementation notes:** Used `--sims 100` everywhere to keep total wall time low; passed `encoding="utf-8"` to subprocess so the em-dash issue from Task 2's draft-session output doesn't cause spurious decode errors on Windows.
+
+#### 3e. Direct unit tests for `_resolve_pick` (`tests/test_draft_session.py`)
+- **What:** Unit tests that exercise `_resolve_pick` directly, no subprocess required. The function is the only real logic in `draft_session.py` (everything else is print/input I/O), so testing it as a function gives near-complete coverage of pick resolution at unit-test speed.
+- **Tests added (8 total, organized into 2 classes):**
+  - `TestNumericPick` — rank 1 returns first player, mid-range rank works, rank 0 returns None, rank above range returns None.
+  - `TestNamePick` — unique substring match, case insensitivity, no match returns None, ambiguous substring returns None and prints a disambiguation message (verified via `capsys`).
+- **Why unit tests instead of subprocess for this:** the draft REPL is interactive and would require driving stdin via subprocess. Pure-function tests are faster and more precise; the REPL loop itself was already exercised manually in Task 2d.
+
+#### Test suite totals
+- Before Task 3: 61 tests passing
+- After Task 3: **82 tests passing** (+13 CLI subprocess + 8 draft-session unit)
