@@ -28,11 +28,25 @@ def run_draft_session(ranked: List[PlayerStats]) -> None:
         _display_board(available)
         _display_position_summary(available)
 
-        pick = input("\nYour pick > ").strip()
+        # Catch Ctrl-C (KeyboardInterrupt) and Ctrl-D / Ctrl-Z+Enter (EOFError)
+        # so the user can exit the draft mid-pick without seeing a traceback.
+        # Both are treated like an explicit `q` — print a tidy message and
+        # fall through to the recap below.
+        try:
+            pick = input("\nYour pick > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n\nDraft session interrupted.")
+            break
 
         if pick.lower() in ("q", "quit", "exit"):
             print("\nDraft session ended.")
             break
+
+        # Pressing Enter with no input would otherwise cause the substring
+        # match below to match every player ("" is in every string), making
+        # the board look ambiguous.  Just re-prompt instead.
+        if not pick:
+            continue
 
         # Try to resolve the input as a rank number first, then as a name substring
         player = _resolve_pick(pick, available)

@@ -239,3 +239,27 @@ A whole-project audit identified five small bugs and three robustness gaps. This
 #### Test suite totals
 - Before round-1 fixes: 82 tests passing
 - After round-1 fixes: **85 tests passing** (+3 new loader tests). All previously-passing tests still pass — the change is fully backward compatible.
+
+### Task 6 — Bug Fixes from Audit (round 2)
+
+Closes the two robustness/UX bugs in the draft session REPL.
+
+#### Fix #6. Ctrl-C / EOF in the draft REPL no longer crashes with a traceback
+- **Bug:** During `--draft`, the REPL called `input()` directly. Hitting Ctrl-C raised `KeyboardInterrupt` and Ctrl-Z + Enter (Windows) or Ctrl-D (Unix) raised `EOFError`. Both surfaced as a Python traceback to the user.
+- **Fix:** `src/cli/draft_session.py` now wraps the `input()` call in `try/except (KeyboardInterrupt, EOFError)` and breaks out of the loop with an `"Draft session interrupted."` message. Any picks made before the interrupt still appear in the final recap.
+- **New tests:**
+  - `TestDraftSession::test_eof_on_first_prompt_exits_cleanly` — sends empty stdin and asserts exit code 0, no `Traceback` in stderr, "interrupted" message in stdout.
+  - `TestDraftSession::test_eof_after_one_pick_shows_recap` — sends one pick then EOF and asserts the recap (`DRAFT RECAP`) prints with the chosen player.
+
+#### Fix #3. Empty input no longer matches every player on the board
+- **Bug:** Pressing Enter with no input left `pick = ""`, which made the substring fallback match every available player (`"" in any_name.lower()` is always True). The user got an "Ambiguous" message listing the entire board, looking like a bug.
+- **Fix:** Added `if not pick: continue` between the quit-check and the resolution call so an empty pick silently re-prompts. Bundled into the same patch as #6 since it sits in the same loop.
+- **New test:**
+  - `TestDraftSession::test_empty_pick_is_ignored_and_does_not_match_all_players` — sends `"\nq\n"` and asserts the ambiguity message never appears and no player is drafted.
+
+#### Test infrastructure note
+- The new draft-session subprocess tests exposed the Windows em-dash piping issue from Task 2d (the `—` byte in `"Remaining depth —"` is invalid UTF-8 when the child's stdout falls back to cp1252). Resolved at the test boundary by setting `PYTHONIOENCODING=utf-8` in `run_cli`'s subprocess env. End-user behavior is unchanged; this just makes piped output on Windows decode cleanly during tests.
+
+#### Test suite totals
+- Before round-2 fixes: 85 tests passing
+- After round-2 fixes: **88 tests passing** (+3 new draft-session subprocess tests). Backward compatible.

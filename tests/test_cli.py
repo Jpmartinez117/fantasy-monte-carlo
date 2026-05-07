@@ -9,6 +9,7 @@ the simulation/stats unit tests.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,17 +41,26 @@ def csv_path(tmp_path: Path) -> Path:
     return p
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     """Invoke the CLI as a subprocess and return the completed process.
 
     Uses --sims 100 by default in callers to keep each test fast.
     text=True + utf-8 encoding avoids Windows cp1252 fallback on em-dash chars.
+    `stdin` (when provided) is fed to the process's standard input — used to
+    drive the interactive --draft REPL deterministically.
     """
+    # Force the child Python's stdout/stderr to UTF-8 so non-ASCII characters
+    # (e.g. em-dashes in draft-session output) survive the pipe on Windows,
+    # where the default console encoding is cp1252 and the bytes are otherwise
+    # not decodable as UTF-8.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, "-m", "src.cli.main", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
+        input=stdin,
+        env=env,
     )
 
 
@@ -200,3 +210,53 @@ class TestFailurePaths:
         )
         assert result.returncode == 2
         assert "h2h" in result.stderr.lower() or "draft" in result.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# Draft session subprocess tests (bug fixes #3 and #6)
+# ---------------------------------------------------------------------------
+
+class TestDraftSession:
+    def test_eof_on_first_prompt_exits_cleanly(self, csv_path: Path):
+        """Closing stdin immediately (no input) used to crash with an
+        unhandled EOFError; the session should now exit with status 0
+        and print an "interrupted" message instead of a traceback."""
+        result = run_cli(
+            "--file", str(csv_path), "--sims", "100", "--draft",
+            stdin="",  # empty stdin → input() raises EOFError on first call
+        )
+        assert result.returncode == 0, result.stderr
+        # No Python traceback in stderr
+        assert "Traceback" not in result.stderr
+        # Friendly message printed
+        assert "interrupted" in result.stdout.lower()
+
+    def test_empty_pick_is_ignored_and_does_not_match_all_players(
+        self, csv_path: Path,
+    ):
+        """Pressing Enter with no input used to make the substring match
+        succeed against every player (empty string is in every name),
+        which dumped an "Ambiguous" list of the whole board. After fix #3
+        an empty pick should silently re-prompt."""
+        # First line is empty (just Enter), second line quits the session.
+        result = run_cli(
+            "--file", str(csv_path), "--sims", "100", "--draft",
+            stdin="\nq\n",
+        )
+        assert result.returncode == 0
+        # The empty input must not have triggered the ambiguity message.
+        assert "Ambiguous" not in result.stdout
+        # And no player should have been drafted.
+        assert "Pick #1" not in result.stdout
+
+    def test_eof_after_one_pick_shows_recap(self, csv_path: Path):
+        """If the user picks at least one player and then hits EOF, the
+        recap should still print so they can see what they drafted."""
+        result = run_cli(
+            "--file", str(csv_path), "--sims", "100", "--draft",
+            stdin="1\n",  # pick rank 1, then EOF (no further input)
+        )
+        assert result.returncode == 0
+        assert "Pick #1" in result.stdout
+        assert "DRAFT RECAP" in result.stdout
+        assert "Alpha QB" in result.stdout
