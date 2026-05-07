@@ -75,3 +75,26 @@ through a CLI.
   - Internal call sites consistently import from full module paths (e.g. `from src.models.player import Player`) rather than going through the package re-exports. The re-exports therefore form the documented public API surface for any future external consumer, even though no current code relies on them.
 - **Why:** Confirms the package boundary is well-defined and that no `__init__.py` is missing required re-exports or carrying broken imports.
 - **Result:** No code changes required. All 61 tests still pass.
+
+### Task 2 — CLI End-to-End Verification
+
+All six smoke tests below were executed against the real `data/players.csv` and confirmed to behave correctly. No code changes were made — this task is verification only.
+
+#### 2a. Default rankings (`python -m src.cli.main`)
+- Loads 26 players, runs 10,000 simulations, prints a fully formatted table sorted by mean. ✅ Pass.
+
+#### 2b. Position filter + top slice (`--pos QB --top 5`)
+- Output limited to the top 5 quarterbacks. Filter and slice both apply. ✅ Pass.
+
+#### 2c. Head-to-head (`--h2h "Josh Harper,Derrick Miles" "Patrick Keller,Christian Grant"`)
+- Prints win-percentage breakdown, average margin, and per-team weekly totals. Result was a near 50/50 split as expected for evenly matched rosters. ✅ Pass.
+
+#### 2d. Interactive draft session (`--draft`)
+- Drove the REPL via piped stdin: rank `1` → Patrick Keller drafted, rank `2` → Jalen Fields, name `Josh` → Josh Harper resolved by substring match, `q` → session ended. Final recap printed all three picks in draft order. ✅ Pass.
+- **Minor finding:** the em-dash in the "Remaining depth —" line renders as `�` when stdout is piped on Windows (cp1252 fallback). Not visible in an interactive terminal. Logged as cosmetic; not a blocker.
+
+#### 2e. Bad CSV (`--file data/players_bad.csv`)
+- Loader emitted 11 row-level warnings (non-numeric values, out-of-range, invalid position, empty name, wrong column count, duplicate, etc.) and continued. Simulation ran on the single valid player (Gabe Repeat). ✅ Pass.
+
+#### 2f. Missing CSV (`--file data/missing.csv`)
+- Printed `[ERROR] File not found: data\missing.csv` and exited with status code `1`. ✅ Pass.
