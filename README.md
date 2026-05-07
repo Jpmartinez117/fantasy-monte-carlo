@@ -357,3 +357,9 @@ A whole-codebase audit identified eight low-risk improvements across performance
 - **Why:** Single source of truth. Changing `MAX_MEAN` from 60 to 70 (e.g. for a different scoring rule) is now a one-line edit, and the loader's error message stays in sync automatically.
 - **Behavior:** Identical to before — same accept/reject behavior on every input, error messages still embed the same numeric bounds (just sourced from the constants now). All 100 tests pass unchanged.
 - **Effort:** ~15 lines across two files. No new tests needed; the existing range-boundary tests in `test_player.py` and `test_loader.py` already cover both sides.
+
+#### Opt #R2. Collapsed `print_table` duplicate format paths
+- **What:** `src/cli/main.py::print_table` previously had two near-identical format paths — one for `show_rank=True` (rankings mode) and one for `show_rank=False` (draft recap). Each path duplicated the column header string and the per-row format string, with the only difference being the optional `Rank` column. Refactored to compute the rank prefix once per call site (`header_rank` for the header line, `row_rank` for each data row) and embed it in a single shared format string.
+- **Why:** Eliminated the two-format-strings-must-stay-in-sync hazard (any column-width tweak previously had to be applied four places to stay aligned). Function is now ~15 lines shorter and reads top-to-bottom without an `if/else` straddle. Verified visually that both modes still produce perfectly aligned tables — rankings table (with `Rank` column) and draft recap (without).
+- **Behavior:** Identical visual output in both modes. All 100 tests pass; manual CLI smoke test (`python -m src.cli.main --top 3` and `--draft`) confirms identical alignment to before.
+- **Effort:** ~15 net lines deleted in `src/cli/main.py`. No new tests needed; the existing CLI subprocess tests assert on table content (header strings, player names, rank ordering) which all still pass.

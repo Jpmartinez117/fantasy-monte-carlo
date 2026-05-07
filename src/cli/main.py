@@ -120,35 +120,26 @@ def print_table(ranked: list, show_rank: bool = True) -> None:
         ranked:    Ordered list of PlayerStats to display.
         show_rank: Whether to include the Rank column (False in draft session).
     """
-    if show_rank:
-        header = (
-            f"{'Rank':<5} {'Name':<22} {'Pos':<5} "
-            f"{'Mean':>6} {'StdDev':>7} "
-            f"{'P10':>6} {'P25':>6} {'P50':>6} {'P75':>6} {'P90':>6}"
-        )
-    else:
-        header = (
-            f"{'Name':<22} {'Pos':<5} "
-            f"{'Mean':>6} {'StdDev':>7} "
-            f"{'P10':>6} {'P25':>6} {'P50':>6} {'P75':>6} {'P90':>6}"
-        )
+    # Optional Rank prefix — width matches the rank-number prefix below so
+    # the header and rows stay aligned regardless of the show_rank flag.
+    header_rank = f"{'Rank':<5} " if show_rank else ""
+    body_columns = (
+        f"{'Name':<22} {'Pos':<5} "
+        f"{'Mean':>6} {'StdDev':>7} "
+        f"{'P10':>6} {'P25':>6} {'P50':>6} {'P75':>6} {'P90':>6}"
+    )
+    header = f"{header_rank}{body_columns}"
 
     print(f"\n{header}")
     print("-" * len(header))
 
     for rank, s in enumerate(ranked, start=1):
-        if show_rank:
-            print(
-                f"{rank:<5} {s.name:<22} {s.position:<5} "
-                f"{s.mean:>6.2f} {s.std_dev:>7.2f} "
-                f"{s.p10:>6.2f} {s.p25:>6.2f} {s.median:>6.2f} {s.p75:>6.2f} {s.p90:>6.2f}"
-            )
-        else:
-            print(
-                f"{s.name:<22} {s.position:<5} "
-                f"{s.mean:>6.2f} {s.std_dev:>7.2f} "
-                f"{s.p10:>6.2f} {s.p25:>6.2f} {s.median:>6.2f} {s.p75:>6.2f} {s.p90:>6.2f}"
-            )
+        row_rank = f"{rank:<5} " if show_rank else ""
+        print(
+            f"{row_rank}{s.name:<22} {s.position:<5} "
+            f"{s.mean:>6.2f} {s.std_dev:>7.2f} "
+            f"{s.p10:>6.2f} {s.p25:>6.2f} {s.median:>6.2f} {s.p75:>6.2f} {s.p90:>6.2f}"
+        )
 
 
 # ---------------------------------------------------------------------------
