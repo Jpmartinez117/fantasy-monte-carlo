@@ -9,44 +9,115 @@ separated and easy to understand.
 ```
 fantasy-monte-carlo/
 │
-├── data/                  # CSV datasets
+├── data/                          # CSV datasets
 │   ├── players.csv
-│   └── players_bad.csv
+│   └── players_bad.csv            # intentionally malformed; used by loader tests
+│
+├── docs/
+│   └── SCHEMA.md                  # CSV schema and validation rules
 │
 ├── src/
 │   ├── __init__.py
 │   ├── models/
 │   │   ├── __init__.py
-│   │   └── player.py
+│   │   └── player.py              # Player dataclass + VALID_POSITIONS
 │   │
 │   ├── data_loader/
 │   │   ├── __init__.py
-│   │   └── csv_loader.py
+│   │   ├── base.py                # PlayerDataProvider ABC + DataLoadError
+│   │   └── csv_loader.py          # CsvPlayerProvider implementation
 │   │
 │   ├── simulation/
 │   │   ├── __init__.py
-│   │   └── monte_carlo.py
+│   │   └── monte_carlo.py         # run_simulation + SimulationResults
 │   │
 │   ├── stats/
 │   │   ├── __init__.py
-│   │   └── statistics_engine.py
+│   │   └── statistics_engine.py   # compute_stats, rank_players, head_to_head
 │   │
 │   └── cli/
 │       ├── __init__.py
-│       └── main.py
+│       ├── main.py                # argparse entry point + rankings/h2h modes
+│       └── draft_session.py       # interactive --draft REPL
 │
 ├── tests/
 │   ├── __init__.py
-│   └── test_loader.py
+│   ├── test_loader.py             # 24 tests — CSV header, validation, duplicates
+│   ├── test_simulation.py         # 13 tests — Monte Carlo input/output/reproducibility
+│   ├── test_stats.py              # 14 tests — percentiles, compute_stats, rank
+│   ├── test_h2h.py                # 10 tests — head-to-head edge cases
+│   ├── test_cli.py                # 13 tests — subprocess-driven CLI smoke tests
+│   └── test_draft_session.py      #  8 tests — _resolve_pick unit tests
 │
 ├── README.md
 ├── requirements.txt
 └── .gitignore
 ```
 
-Each package contains placeholder modules initially. Development will implement functionality
-for loading data, modeling players, running simulations, computing statistics, and interacting
-through a CLI.
+The codebase implements a complete MVP-1 fantasy draft helper: CSV ingestion with
+validation, a Monte Carlo simulation engine, a statistics engine for per-player
+percentiles and head-to-head matchups, and a command-line interface offering
+ranked tables, position filters, head-to-head comparisons, and an interactive
+draft session.
+
+## How to Run
+
+### 1. Install
+
+Python 3.10+ is required. The only runtime dependency is `pytest` (used for tests).
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Run the CLI
+
+All commands are invoked as a module so the `src.` package imports resolve cleanly.
+
+**Default rankings table** (loads `data/players.csv`, runs 10,000 simulations):
+
+```bash
+python -m src.cli.main
+```
+
+**Filter and slice the rankings:**
+
+```bash
+python -m src.cli.main --pos QB --top 5
+```
+
+**Head-to-head comparison** between two rosters (comma-separated names):
+
+```bash
+python -m src.cli.main --h2h "Josh Harper,Derrick Miles" "Patrick Keller,Christian Grant"
+```
+
+**Interactive draft session** — pick by rank number or by name substring; type `q` to quit:
+
+```bash
+python -m src.cli.main --draft
+```
+
+**Use a different CSV file or simulation count:**
+
+```bash
+python -m src.cli.main --file data/players.csv --sims 50000
+```
+
+**Full flag reference:**
+
+```bash
+python -m src.cli.main --help
+```
+
+### 3. Run the tests
+
+```bash
+python -m pytest
+```
+
+The full suite is currently **82 tests** across loader, simulation, stats,
+head-to-head, CLI subprocess smoke tests, and draft-session unit tests.
 
 ## Updates
 
@@ -122,3 +193,26 @@ Closed the only remaining MVP gap: prior to this task, every layer below the CLI
 #### Test suite totals
 - Before Task 3: 61 tests passing
 - After Task 3: **82 tests passing** (+13 CLI subprocess + 8 draft-session unit)
+
+### Task 4 — Documentation
+
+#### 4a. Refreshed the project tree
+- **What:** Replaced the project-tree section with the actual current layout. The previous tree was written before the codebase was finished and was missing `stats/`, `data_loader/base.py`, `cli/draft_session.py`, `docs/SCHEMA.md`, and most test files; it also still listed packages as "placeholder modules initially."
+- **Result:** Tree now reflects the real file set, with one-line descriptions next to each non-obvious file (e.g. what `base.py` contributes, the role of each test file with test counts).
+
+#### 4b. Added a "How to Run" section
+- **What:** New top-level section documenting install, four representative CLI invocations (default rankings, filter + slice, head-to-head, interactive draft, custom file/sims), the `--help` reference, and how to run the test suite.
+- **Why:** Lowers the bar to first contact. Anyone cloning the repo can now install dependencies, run the CLI, and execute the tests without reading source code first.
+- **Result:** README now contains executable commands a new user can copy directly. Examples use the same player names that exist in `data/players.csv` so they work out of the box.
+
+#### 4c. Verified `docs/SCHEMA.md` against the loader implementation
+- **What:** Cross-checked every rule in `docs/SCHEMA.md` against `src/data_loader/csv_loader.py` and `src/models/player.py`.
+- **Findings:**
+  - Header `Name,Position,Mean,StdDev` — matches `EXPECTED_HEADER` constant.
+  - Position validation `{QB,RB,WR,TE}` — matches `VALID_POSITIONS` set; loader uppercases input before checking.
+  - Mean range `0–60` and StdDev range `0–25` — both enforced in `_validate_row` with inclusive bounds.
+  - NaN/Infinity rejection — implemented via `math.isfinite` in `_parse_float`.
+  - Exactly 4 columns per row — enforced before field validation.
+  - Duplicate `(Name, Position)` — loader keeps first occurrence and warns on subsequent matches.
+  - "Collapse multiple internal spaces in Name" is documented as **optional** in the spec and is intentionally not implemented (only `.strip()` is applied). Spec wording is already accurate.
+- **Result:** SCHEMA.md is fully aligned with current loader behavior. No edits required.
