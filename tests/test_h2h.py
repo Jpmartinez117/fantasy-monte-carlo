@@ -38,6 +38,34 @@ class TestH2HValidation:
         with pytest.raises(ValueError, match="not found"):
             head_to_head(roster_results, ["Elite QB"], ["Nobody Here"])
 
+    # --- Bug fix #5: empty roster validation -------------------------------
+
+    def test_empty_team_a_raises(self, roster_results):
+        with pytest.raises(ValueError, match="Team A.*empty"):
+            head_to_head(roster_results, [], ["Elite QB"])
+
+    def test_empty_team_b_raises(self, roster_results):
+        with pytest.raises(ValueError, match="Team B.*empty"):
+            head_to_head(roster_results, ["Elite QB"], [])
+
+    # --- Bug fix #4: within-team duplicate validation ----------------------
+
+    def test_team_a_with_duplicate_player_raises(self, roster_results):
+        with pytest.raises(ValueError, match="Team A.*duplicate"):
+            head_to_head(roster_results, ["Elite QB", "Elite QB"], ["Weak QB"])
+
+    def test_team_b_with_duplicate_player_raises(self, roster_results):
+        with pytest.raises(ValueError, match="Team B.*duplicate"):
+            head_to_head(roster_results, ["Elite QB"], ["Weak QB", "Weak QB"])
+
+    def test_same_player_on_both_teams_is_allowed(self, roster_results):
+        # Cross-team duplicates are intentionally permitted — a player on both
+        # rosters is degenerate but well-defined (cancels out in the margin).
+        result = head_to_head(roster_results, ["Elite QB"], ["Elite QB"])
+        # Each team scores the same value every trial → 100% ties, 0 margin.
+        assert result.tie_pct == pytest.approx(100.0)
+        assert result.avg_margin == pytest.approx(0.0)
+
 
 # ---------------------------------------------------------------------------
 # Output structure

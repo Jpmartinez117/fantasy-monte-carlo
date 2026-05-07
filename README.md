@@ -263,3 +263,41 @@ Closes the two robustness/UX bugs in the draft session REPL.
 #### Test suite totals
 - Before round-2 fixes: 85 tests passing
 - After round-2 fixes: **88 tests passing** (+3 new draft-session subprocess tests). Backward compatible.
+
+### Task 7 — Bug Fixes from Audit (round 3)
+
+Closes the remaining three audit findings: head-to-head input validation (#4, #5) and Player whitespace-name validation (#8).
+
+#### Fix #4. Head-to-head rejects within-team duplicate players
+- **Bug:** `head_to_head` accepted a roster with the same player listed twice (e.g. `["Josh Harper", "Josh Harper"]`). The duplicate's score was added to the team total each time, silently inflating the result. A typo on the CLI's comma-split path (e.g. `"Smith, Jr."` accidentally splitting a comma-containing name) could produce this without warning.
+- **Fix:** `src/stats/statistics_engine.py` now raises `ValueError("Team A has duplicate players")` (or "Team B") when `len(set(names)) != len(names)`. Cross-team duplicates (the same player on both rosters) are still allowed — that's a degenerate but well-defined scenario the simulator handles correctly.
+- **New tests:** `test_team_a_with_duplicate_player_raises`, `test_team_b_with_duplicate_player_raises`, `test_same_player_on_both_teams_is_allowed`.
+
+#### Fix #5. Head-to-head rejects empty rosters
+- **Bug:** Passing an empty list for one team gave the other team a 100% win rate against zero points, returning a misleading `H2HResult`.
+- **Fix:** Added `if not team_a_names: raise ValueError("Team A roster cannot be empty")` (and equivalent for B) at the top of `head_to_head`.
+- **New tests:** `test_empty_team_a_raises`, `test_empty_team_b_raises`.
+
+#### Fix #8. `Player(name="   ")` is now rejected
+- **Bug:** `Player.__post_init__` checked `if not self.name`, which is `False` for any whitespace-only string (those are truthy in Python). The CSV loader already strips before constructing, so the file path was safe — but anyone constructing `Player` directly (tests, future modules) could create a "blank-named" player.
+- **Fix:** Changed the check to `if not self.name.strip():` in `src/models/player.py`. Empty and whitespace-only names are now both rejected with `ValueError("Player name cannot be empty")`.
+- **New file:** `tests/test_player.py` with seven tests covering valid construction, empty/whitespace/tab-only name rejection, and the existing position / mean / stddev range guards.
+
+#### Test suite totals
+- Before round-3 fixes: 88 tests passing
+- After round-3 fixes: **100 tests passing** (+5 new h2h validation tests + 7 new player validation tests). Backward compatible.
+
+#### Audit closeout
+All eight findings from the project audit are now resolved:
+| # | Issue | Round |
+|---|---|---|
+| #1 | UTF-8 BOM breaks header check | 1 |
+| #2 | Non-UTF-8 file → uncaught traceback | 1 |
+| #7 | Quoted multi-line field misparsed | 1 |
+| #6 | Ctrl-C / EOF in draft REPL crashes | 2 |
+| #3 | Empty draft input matches every player | 2 |
+| #4 | Head-to-head ignores within-team duplicates | 3 |
+| #5 | Head-to-head accepts empty rosters | 3 |
+| #8 | Whitespace-only Player name passes validation | 3 |
+
+The clamping bias and Windows-pipe em-dash items remain documented as known accepted limitations, not bugs.

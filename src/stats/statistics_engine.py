@@ -100,8 +100,27 @@ def head_to_head(
         H2HResult with win percentages and average scoring margin.
 
     Raises:
-        ValueError: If any player name is not found in results.
+        ValueError: If either roster is empty, contains a duplicate player,
+                    or names a player not present in the simulation results.
     """
+    # Reject empty rosters — a "team" with no players has no meaningful
+    # win probability and would silently produce a 100%/0% degenerate
+    # result without this check.
+    if not team_a_names:
+        raise ValueError("Team A roster cannot be empty")
+    if not team_b_names:
+        raise ValueError("Team B roster cannot be empty")
+
+    # Reject within-team duplicates.  A typo like splitting "Smith, Jr."
+    # on the comma in the CLI could otherwise count one player twice and
+    # silently inflate that team's score.  Cross-team duplicates (same
+    # player on both sides) are still allowed — that's a degenerate but
+    # well-defined scenario the simulator handles correctly.
+    if len(set(team_a_names)) != len(team_a_names):
+        raise ValueError("Team A has duplicate players")
+    if len(set(team_b_names)) != len(team_b_names):
+        raise ValueError("Team B has duplicate players")
+
     # Validate that every name exists in the simulation data
     known = set(results.scores.keys())
     for name in team_a_names + team_b_names:

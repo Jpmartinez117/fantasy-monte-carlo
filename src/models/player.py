@@ -23,7 +23,11 @@ class Player:
     std_dev: float
 
     def __post_init__(self):
-        if not self.name:
+        # Reject both an empty string and a whitespace-only string.  The CSV
+        # loader already strips before constructing Player, but this guard
+        # protects any direct caller (tests, future code paths) from creating
+        # a "blank-named" player that the rest of the system would mis-handle.
+        if not self.name.strip():
             raise ValueError("Player name cannot be empty")
         if self.position not in VALID_POSITIONS:
             raise ValueError(
